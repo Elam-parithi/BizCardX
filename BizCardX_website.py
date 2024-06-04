@@ -107,9 +107,7 @@ if selected == "Upload & Extract":
         result = reader.readtext(saved_img, detail=0, paragraph=False)
 
 
-        # CONVERTING IMAGE TO BINARY TO UPLOAD TO SQL DATABASE
         def img_to_binary(file):
-            # Convert image data to binary format
             with open(file, 'rb') as file:
                 binaryData = file.read()
             return binaryData
