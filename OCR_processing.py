@@ -1,87 +1,106 @@
-
-
-import cv2
 import matplotlib.pyplot as plt
 import easyocr
 import re
 import os
 import pandas as pd
+from PIL import Image, ImageDraw
 
-reader = easyocr.Reader(['en'])
+# Initialize EasyOCR Reader only once
+reader = easyocr.Reader(['en'], gpu=True)
 
 def process_image(image_path):
-    image = cv2.imread(image_path)
-    res = reader.readtext(image_path)
-    for bbox, text, prob in res:
+    """ Reads text from image and annotates detected text """
+    image = Image.open(image_path).convert("RGB")
+    draw = ImageDraw.Draw(image)
+    
+    # Perform OCR
+    results = reader.readtext(image_path)
+
+    for bbox, text, prob in results:
         (tl, tr, br, bl) = bbox
         tl = (int(tl[0]), int(tl[1]))
         br = (int(br[0]), int(br[1]))
-        cv2.rectangle(image, tl, br, (0, 255, 0), 2)
-        cv2.putText(image, text, (tl[0], tl[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-    plt.rcParams['figure.figsize'] = (15, 15)
+
+        draw.rectangle([tl, br], outline="green", width=2)
+        draw.text((tl[0], tl[1] - 10), text, fill="blue")
+
+    plt.figure(figsize=(10, 10))
     plt.axis('off')
     plt.imshow(image)
-    return plt, res
+    plt.show()
 
-def img_to_binary(file):
-    with open(file, 'rb') as file:
-        binaryData = file.read()
-    return binaryData
+    return results
 
-def get_data(res, img_path):
+def img_to_binary(file_path):
+    """ Convert image to binary data for storage """
+    with open(file_path, 'rb') as file:
+        return file.read()
+
+def extract_data(results, img_path):
+    """ Extract structured data from OCR results """
     data = {
-        "company_name": [],
-        "card_holder": [],
-        "designation": [],
-        "mobile_number": [],
-        "email": [],
-        "website": [],
-        "area": [],
-        "city": [],
-        "state": [],
-        "pin_code": [],
+        "company_name": "",
+        "card_holder": "",
+        "designation": "",
+        "mobile_number": "",
+        "email": "",
+        "website": "",
+        "area": "",
+        "city": "",
+        "state": "",
+        "pin_code": "",
         "image": img_to_binary(img_path)
     }
 
-    for ind, i in enumerate(res):
-        if "www" in i.lower():
-            data["website"].append(i)
-        elif "@" in i:
-            data["email"].append(i)
-        elif "-" in i:
-            data["mobile_number"].append(i)
-            if len(data["mobile_number"]) == 2:
-                data["mobile_number"] = " & ".join(data["mobile_number"])
-        elif ind == len(res) - 1:
-            data["company_name"].append(i)
-        elif ind == 0:
-            data["card_holder"].append(i)
-        elif ind == 1:
-            data["designation"].append(i)
-        if re.findall('^[0-9].+, [a-zA-Z]+', i):
-            data["area"].append(i.split(',')[0])
-        elif re.findall('[0-9] [a-zA-Z]+', i):
-            data["area"].append(i)
-        match1 = re.findall('.+St , ([a-zA-Z]+).+', i)
-        match2 = re.findall('.+St,, ([a-zA-Z]+).+', i)
-        match3 = re.findall('^[E].*', i)
-        if match1:
-            data["city"].append(match1[0])
-        elif match2:
-            data["city"].append(match2[0])
-        elif match3:
-            data["city"].append(match3[0])
-        state_match = re.findall('[a-zA-Z]{9} +[0-9]', i)
+    mobile_numbers = []
+
+    for index, (bbox, text, prob) in enumerate(results):
+        text = text.strip()
+
+        if "www" in text.lower() or "http" in text.lower():
+            data["website"] = text
+        elif "@" in text:
+            data["email"] = text
+        elif re.match(r'^\+?\d{1,3}?[-.\s]?\(?\d{2,5}?\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}$', text):
+            mobile_numbers.append(text)
+        elif index == 0:
+            data["card_holder"] = text
+        elif index == 1:
+            data["designation"] = text
+        elif index == len(results) - 1:
+            data["company_name"] = text
+
+        # Address extraction
+        if re.search(r'^[0-9].+, [a-zA-Z]+', text):
+            data["area"] = text.split(',')[0]
+        elif re.search(r'[0-9] [a-zA-Z]+', text):
+            data["area"] = text
+
+        # City extraction
+        city_match = re.search(r'.+St , ([a-zA-Z]+)', text) or re.search(r'.+St,, ([a-zA-Z]+)', text)
+        if city_match:
+            data["city"] = city_match.group(1)
+
+        # State extraction
+        state_match = re.search(r'([a-zA-Z]{9}) +[0-9]', text)
         if state_match:
-            data["state"].append(i[:9])
-        elif re.findall('^[0-9].+, ([a-zA-Z]+);', i):
-            data["state"].append(i.split()[-1])
-        if len(data["state"]) == 2:
-            data["state"].pop(0)
-        if len(i) >= 6 and i.isdigit():
-            data["pin_code"].append(i)
-        elif re.findall('[a-zA-Z]{9} +[0-9]', i):
-            data["pin_code"].append(i[10:])
+            data["state"] = state_match.group(1)
+
+        # PIN Code extraction
+        if re.match(r'^\d{6}$', text):
+            data["pin_code"] = text
+
+    # Format mobile numbers
+    if len(mobile_numbers) == 2:
+        data["mobile_number"] = " & ".join(mobile_numbers)
+    elif mobile_numbers:
+        data["mobile_number"] = mobile_numbers[0]
     return data
 
-
+if __name__ == "__main__":
+    image_path = r"../Sample_dataset/1.png"
+    print("pass 1")
+    results = process_image(image_path)
+    print("pass 1")
+    extracted_data = extract_data(results, image_path)
+    print(pd.DataFrame([extracted_data]))
